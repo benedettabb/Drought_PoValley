@@ -1,3 +1,4 @@
+
 import glob
 from pathlib import Path
 import pandas as pd
@@ -11,49 +12,42 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
 
 
-##############################################################################################
-# Plotta la correlazione lagged
-def lagged_corr(df, var, var_meteo):
+########################################################################################
+
+# Plotta la correlazione cumulata 
+
+def cumulative_corr(df, var, var_meteo, window_size=12):
     correlations = list()
     shifts = list()
     significance = list()
-    df = df[[var, var_meteo]]
-    df = df.dropna(axis=0)
 
-    
-    for n in range(1, 7,1):
-        col_name = "Lagged_{}".format(n)
-        df[col_name] = df[var_meteo].shift(n)
+    var = df[var]
+    var_meteo = df[var_meteo]
+    outdf = pd.DataFrame({"var":var, "var_meteo":var_meteo})
+    outdf = outdf.dropna(axis=0)
+    outdf["var"] = pd.to_numeric(outdf["var"], errors='coerce')
+    outdf["var_meteo"] = pd.to_numeric(outdf["var_meteo"], errors='coerce')
 
-    # Correlation con shift = 0
-    r_0, p_0 = pearsonr(df[var], df[var_meteo])
-    correlations.append(r_0)
-    shifts.append("0")
-    significance.append(p_0)
-    for i in range(1, 12,1):
+    for window_size in range(2, 13):
+        outdf['Cumulative_{}'.format(var_meteo)] = outdf["var_meteo"].rolling(window=window_size, min_periods=1).sum()
+        tempdf = pd.DataFrame({"cum":outdf['Cumulative_{}'.format(var_meteo)], "param":outdf["var"]})
+        shifts.append(window_size)
         try:
-            col_name = "Lagged_{}".format(i)
-            tempdf = df[[var, col_name]]
-            tempdf = tempdf.dropna(axis=0)
-            r, p = pearsonr(tempdf[var], tempdf[col_name])
-            correlations.append(r)
-            significance.append(p)
-            shifts.append(i)
+            r, p = pearsonr(tempdf["param"], tempdf["cum"])
         except:
-            correlations.append(np.nan)
-            significance.append(np.nan)
-            shifts.append(np.nan)
-    final = pd.DataFrame({"Lag_month": shifts,"R":correlations, "P":significance})
+            r, p = np.nan, np.nan
+
+        correlations.append(r)
+        significance.append(p)
+    final = pd.DataFrame({"Window_months": shifts, "R": correlations, "P": significance})
     final = final[final.P<=0.05]
     try:
         max_value = final.R.iloc[np.argmax(abs(final.R))]
-        max_window = final.Lag_month.iloc[np.argmax(abs(final.R))]
-        print(max_value, max_window)
+        max_window = final.Window_months.iloc[np.argmax(abs(final.R))]
         return max_value, max_window
     except Exception as e:
         print(e)
         return np.nan, np.nan 
-    
 
 ###########################################################################
 
@@ -67,7 +61,7 @@ def to_num (df, coord):
     df = df[df.lat == float(lat)]
     return df
 
-###########################################################################
+############################################################################
 
 # Funzione per ottenere i dati unificati e calcolare la correlazione
 def main(coord, ndvi_dir, sif_dir, spi_dir, spei_dir, sm_dir):
@@ -91,16 +85,16 @@ def main(coord, ndvi_dir, sif_dir, spi_dir, spei_dir, sm_dir):
         for col in merged_df.columns:
             merged_df[col] = merged_df[col].interpolate(method = "linear", limit = 2)
 
-                # Prendi le correlazioni
-        max_corr_sif_spi, best_window_sif_spi = lagged_corr(merged_df, "SIF", "SPI")
-        max_corr_sif_spei, best_window_sif_spei = lagged_corr(merged_df, "SIF", "SPEI")
-        max_corr_ndvi_spi, best_window_ndvi_spi = lagged_corr(merged_df, "NDVI", "SPI")
-        max_corr_ndvi_spei, best_window_ndvi_spei = lagged_corr(merged_df, "NDVI", "SPEI")
-        max_corr_sif_sm, best_window_sif_sm = lagged_corr(merged_df, "SIF", "SM")
-        max_corr_ndvi_sm, best_window_ndvi_sm = lagged_corr(merged_df, "NDVI", "SM")
-        max_corr_sm_spi, best_window_sm_spi = lagged_corr(merged_df, "SM", "SPI")
-        max_corr_sm_spei, best_window_sm_spei = lagged_corr(merged_df, "SM", "SPEI")
-        max_corr_ndvi_sif, best_window_ndvi_sif = lagged_corr(merged_df, "NDVI", "SIF")
+        # Prendi le correlazioni
+        max_corr_sif_spi, best_window_sif_spi = cumulative_corr(merged_df, "SIF", "SPI")
+        max_corr_sif_spei, best_window_sif_spei = cumulative_corr(merged_df, "SIF", "SPEI")
+        max_corr_ndvi_spi, best_window_ndvi_spi = cumulative_corr(merged_df, "NDVI", "SPI")
+        max_corr_ndvi_spei, best_window_ndvi_spei = cumulative_corr(merged_df, "NDVI", "SPEI")
+        max_corr_sif_sm, best_window_sif_sm = cumulative_corr(merged_df, "SIF", "SM")
+        max_corr_ndvi_sm, best_window_ndvi_sm = cumulative_corr(merged_df, "NDVI", "SM")
+        max_corr_sm_spi, best_window_sm_spi = cumulative_corr(merged_df, "SM", "SPI")
+        max_corr_sm_spei, best_window_sm_spei = cumulative_corr(merged_df, "SM", "SPEI")
+        max_corr_ndvi_sif, best_window_ndvi_sif = cumulative_corr(merged_df, "NDVI", "SIF")
 
         # Aggiungi al dizionario
         data["lat"].append(float(coord.split('_')[1]))
@@ -158,5 +152,13 @@ coords = glob.glob(r"D:\DROUGHT\processing\all\*csv")
 
 # Creare il DataFrame finale con i risultati
 df_out = pd.DataFrame(data)
-df_out.to_csv(r"D:\DROUGHT\results\diff_media\lagged_correlation_v2.csv")
-print(r"Saved in D:\DROUGHT\results\diff_media\lagged_correlation_v2.csv")
+df_out.to_csv(r"D:\DROUGHT\results\diff_media\cumulative_correlation_v2.csv")
+print(r"Saved in D:\DROUGHT\results\diff_media\cumulative_correlation_v2.csv")
+
+
+
+
+
+
+
+
